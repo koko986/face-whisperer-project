@@ -88,8 +88,8 @@ export function createVoiceAssistant(options: VoiceAssistantOptions = {}) {
     const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!Ctor) return null;
     const rec = new Ctor();
-    rec.continuous = false;
-    rec.interimResults = false;
+    rec.continuous = true;
+    rec.interimResults = true;
     rec.lang = "en-US";
     return rec;
   })();
@@ -98,6 +98,10 @@ export function createVoiceAssistant(options: VoiceAssistantOptions = {}) {
   let stateListeners: Array<(s: VoiceState) => void> = [];
   let transcriptListeners: Array<(text: string) => void> = [];
   let responseListeners: Array<(text: string) => void> = [];
+  const history: { role: "user" | "assistant"; content: string }[] = [];
+  let conversationActive = false;
+
+  const MAX_HISTORY = 10;
 
   function setState(next: VoiceState) {
     state = next;
@@ -106,6 +110,10 @@ export function createVoiceAssistant(options: VoiceAssistantOptions = {}) {
 
   function getState() {
     return state;
+  }
+
+  function isInConversation() {
+    return conversationActive;
   }
 
   function onStateChange(fn: (s: VoiceState) => void) {
@@ -137,8 +145,26 @@ export function createVoiceAssistant(options: VoiceAssistantOptions = {}) {
     utter.pitch = 1;
     utter.volume = 1;
     utter.onstart = () => setState("speaking");
-    utter.onend = () => setState("idle");
-    utter.onerror = () => setState("idle");
+    utter.onend = () => {
+      setState("listening");
+      if (conversationActive && recognition) {
+        try {
+          recognition.start();
+        } catch {
+          // ignore restart errors
+        }
+      }
+    };
+    utter.onerror = () => {
+      setState("listening");
+      if (conversationActive && recognition) {
+        try {
+          recognition.start();
+        } catch {
+          // ignore restart errors
+        }
+      }
+    };
     setState("speaking");
     window.speechSynthesis.speak(utter);
   }
@@ -155,6 +181,12 @@ Rules:
 - If the user asks to run an action, confirm it in one short sentence.
 - Be helpful but terse.`;
 
+    const messages = [
+      { role: "system" as const, content: systemPrompt },
+      ...history.slice(-MAX_HISTORY),
+      { role: "user" as const, content: transcript },
+    ];
+
     const res = await fetch(GROQ_API_URL, {
       method: "POST",
       headers: {
@@ -163,10 +195,7 @@ Rules:
       },
       body: JSON.stringify({
         model: "llama-3.3-70b-versatile",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: transcript },
-        ],
+        messages,
         max_tokens: 120,
         temperature: 0.3,
       }),
@@ -181,6 +210,10 @@ Rules:
       choices?: { message?: { content?: string } }[];
     };
     const reply = data.choices?.[0]?.message?.content?.trim() ?? "I couldn't process that.";
+
+    history.push({ role: "user", content: transcript }, { role: "assistant", content: reply });
+    if (history.length > MAX_HISTORY * 2) history.splice(0, history.length - MAX_HISTORY * 2);
+
     return reply;
   }
 
@@ -203,26 +236,36 @@ Rules:
       responseListeners.forEach((fn) => fn(reply));
     }
 
-    // Always execute the command locally, even if Groq fails
     options.onCommand?.(command, transcript, reply);
 
     if (groqError) {
       setState("error");
       options.onError?.(groqError);
-      setTimeout(() => setState("idle"), 3000);
+      setTimeout(() => {
+        if (conversationActive && recognition) {
+          try {
+            recognition.start();
+          } catch {
+            // ignore restart errors
+          }
+        }
+      }, 3000);
     } else {
       speak(reply);
     }
   }
 
-  async function startListening(context: string) {
+  async function startConversation(context: string) {
     if (!recognition) {
       options.onError?.("Speech recognition is not supported in this browser.");
       return;
     }
-    if (state === "listening" || state === "processing" || state === "speaking") {
+    if (conversationActive) {
       return;
     }
+
+    conversationActive = true;
+    history.length = 0;
 
     recognition.onresult = (event: { results: SpeechRecognitionResultList }) => {
       const last = event.results[event.results.length - 1];
@@ -234,11 +277,23 @@ Rules:
     recognition.onerror = (event: { error: string }) => {
       setState("error");
       options.onError?.(event.error);
-      setTimeout(() => setState("idle"), 3000);
+      setTimeout(() => {
+        if (conversationActive && recognition) {
+          try {
+            recognition.start();
+          } catch {
+            // ignore restart errors
+          }
+        }
+      }, 3000);
     };
     recognition.onend = () => {
-      if (state === "listening") {
-        setState("idle");
+      if (conversationActive && state !== "processing" && state !== "speaking") {
+        try {
+          recognition.start();
+        } catch {
+          // ignore restart errors
+        }
       }
     };
     recognition.onstart = () => setState("listening");
@@ -249,13 +304,20 @@ Rules:
     } catch {
       setState("error");
       options.onError?.("Microphone access denied or unavailable.");
-      setTimeout(() => setState("idle"), 3000);
+      conversationActive = false;
+      setState("idle");
     }
   }
 
-  function stopListening() {
+  function stopConversation() {
+    conversationActive = false;
     if (recognition) {
-      recognition.abort();
+      recognition.onend = null;
+      try {
+        recognition.abort();
+      } catch {
+        // ignore abort errors
+      }
     }
     if (state === "listening") {
       setState("idle");
@@ -263,10 +325,11 @@ Rules:
   }
 
   function cancel() {
-    stopListening();
+    stopConversation();
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
+    history.length = 0;
     setState("idle");
   }
 
@@ -276,10 +339,12 @@ Rules:
     onStateChange,
     onTranscript,
     onResponse,
-    startListening,
-    stopListening,
+    startListening: startConversation,
+    stopListening: stopConversation,
     cancel,
     speak,
     parseCommand,
+    history,
+    isInConversation,
   };
 }
