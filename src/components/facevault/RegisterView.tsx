@@ -70,8 +70,14 @@ export function RegisterView({
   };
 
   const commit = () => {
-    if (!name.trim()) return toast.error("Participant name required");
-    if (samples.length < 2) return toast.error("At least 2 training frames required");
+    if (!name.trim()) {
+      toast.error("Participant name required");
+      return;
+    }
+    if (samples.length < 2) {
+      toast.error("At least 2 training frames required");
+      return;
+    }
     onRegister(
       name.trim(),
       samples.map((s) => s.vec),

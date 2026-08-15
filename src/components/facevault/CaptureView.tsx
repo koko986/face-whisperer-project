@@ -36,7 +36,10 @@ export function CaptureView({
   useEffect(() => () => stopLive(), [stopLive]);
 
   const startLive = async () => {
-    if (!model) return toast.error("Register at least two participants first");
+    if (!model) {
+      toast.error("Register at least two participants first");
+      return;
+    }
     if (!camera.active) await camera.start();
     setLive(true);
     loop.current = setInterval(() => {
@@ -58,7 +61,10 @@ export function CaptureView({
 
   const snapshot = () => {
     const video = camera.videoRef.current;
-    if (!video || video.videoWidth === 0) return toast.error("Start the camera feed first");
+    if (!video || video.videoWidth === 0) {
+      toast.error("Start the camera feed first");
+      return;
+    }
     const face = sourceToFace(video, video.videoWidth, video.videoHeight);
     analyse(face.vec, face.preview, "live frame");
   };
