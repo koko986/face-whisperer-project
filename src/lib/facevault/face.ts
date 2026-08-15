@@ -145,11 +145,12 @@ export type MatchResult = {
   confidence: number;
   distance: number;
   runnerUp: number;
+  candidates: { name: string; confidence: number }[];
 };
 
 export function classify(v: Vec, model: FaceModel | null): MatchResult {
   if (!model || model.refs.length === 0)
-    return { name: null, confidence: 0, distance: Infinity, runnerUp: Infinity };
+    return { name: null, confidence: 0, distance: Infinity, runnerUp: Infinity, candidates: [] };
   const coords = project(v, model.mean, model.basis);
   const byName = new Map<string, number>();
   for (const ref of model.refs) {
@@ -165,7 +166,11 @@ export function classify(v: Vec, model: FaceModel | null): MatchResult {
   const separation = runnerUp === 0 ? 0 : 1 - best[1] / runnerUp;
   const closeness = 1 / (1 + best[1] / (norm(coords) || 1));
   const confidence = Math.max(0, Math.min(1, 0.45 * separation + 0.9 * closeness));
-  return { name: best[0], confidence, distance: best[1], runnerUp };
+  const candidates = ranked.slice(0, 3).map(([name, distance]) => ({
+    name,
+    confidence: Math.max(0, Math.min(1, best[1] === 0 ? 1 : 1 - (distance - best[1]) / best[1])),
+  }));
+  return { name: best[0], confidence, distance: best[1], runnerUp, candidates };
 }
 
 /* --------------------------------------------------------- compression lab */
@@ -182,11 +187,14 @@ export type RankSample = {
  * Rank-k SVD reconstructions of one face, each re-run through the classifier.
  * This is the compression experiment that feeds the chart.
  */
-export function compressionSweep(v: Vec, model: FaceModel | null): RankSample[] {
+export function compressionSweep(
+  v: Vec,
+  model: FaceModel | null,
+): { ranks: RankSample[]; singularValues: number[] } {
   const image = mat(FACE_SIZE, FACE_SIZE, v);
   const svd = partialSVD(image, Math.max(...RANKS), 30);
   const total = svd.s.reduce((s, x) => s + x * x, 0) || 1;
-  return RANKS.map((rank) => {
+  const ranks = RANKS.map((rank) => {
     const rec = reconstruct(svd, FACE_SIZE, FACE_SIZE, rank);
     const norm01 = standardize(rec.data);
     const match = classify(norm01, model);
@@ -199,4 +207,5 @@ export function compressionSweep(v: Vec, model: FaceModel | null): RankSample[] 
       energy,
     };
   });
+  return { ranks, singularValues: svd.s };
 }

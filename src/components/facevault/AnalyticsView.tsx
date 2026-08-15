@@ -1,3 +1,4 @@
+import { SVDEquationView } from "./SVDEquationView";
 import {
   CartesianGrid,
   Line,
@@ -8,8 +9,15 @@ import {
   YAxis,
 } from "recharts";
 import type { Analysis } from "./types";
+import { VoiceAssistant } from "./VoiceAssistant";
 
-export function AnalyticsView({ analysis }: { analysis: Analysis | null }) {
+export function AnalyticsView({
+  analysis,
+  onVoiceAction,
+}: {
+  analysis: Analysis | null;
+  onVoiceAction?: (action: { type: string; target?: string | undefined }) => void;
+}) {
   const data =
     analysis?.ranks.map((r) => ({
       rank: `k=${r.rank}`,
@@ -30,11 +38,14 @@ export function AnalyticsView({ analysis }: { analysis: Analysis | null }) {
 
       {!analysis ? (
         <p className="text-sm text-muted-foreground">
-          No experiment on the bench. Run <span className="text-foreground">Capture &amp; analyse</span>{" "}
-          or upload a specimen from the capture view.
+          No experiment on the bench. Run{" "}
+          <span className="text-foreground">Capture &amp; analyse</span> or upload a specimen from
+          the capture view.
         </p>
       ) : (
         <>
+          <SVDEquationView analysis={analysis} />
+
           <div className="grid gap-6 lg:grid-cols-3">
             <div className="space-y-2">
               <Metric
@@ -43,6 +54,21 @@ export function AnalyticsView({ analysis }: { analysis: Analysis | null }) {
                 sub={`${(analysis.base.confidence * 100).toFixed(1)}% confidence · ${analysis.origin}`}
                 accent
               />
+              {analysis.base.candidates.length > 1 && (
+                <div className="space-y-1 rounded-lg bg-card p-3 ring-1 ring-border">
+                  <p className="fv-label">Top candidates</p>
+                  {analysis.base.candidates.map((c, i) => (
+                    <div key={c.name} className="flex items-center justify-between text-[11px]">
+                      <span className="font-mono text-muted-foreground">
+                        {i + 1}. {c.name}
+                      </span>
+                      <span className="font-mono text-muted-foreground">
+                        {(c.confidence * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
               <Metric
                 label="Recommended rank (k)"
                 value={String(best?.rank ?? "—")}
@@ -129,7 +155,11 @@ export function AnalyticsView({ analysis }: { analysis: Analysis | null }) {
                     r.rank === best?.rank ? "ring-primary/60" : "ring-border"
                   }`}
                 >
-                  <img src={r.preview} alt={`rank ${r.rank} reconstruction`} className="w-full rounded-sm" />
+                  <img
+                    src={r.preview}
+                    alt={`rank ${r.rank} reconstruction`}
+                    className="w-full rounded-sm"
+                  />
                   <figcaption className="space-y-0.5 pt-1.5 text-center">
                     <p
                       className={`font-mono text-[10px] uppercase ${
@@ -146,6 +176,13 @@ export function AnalyticsView({ analysis }: { analysis: Analysis | null }) {
               ))}
             </div>
           </section>
+
+          <VoiceAssistant
+            context={`Analytics lab. Best rank: ${best?.rank ?? "—"} at ${((best?.energy ?? 0) * 100).toFixed(1)}% energy. Available commands: go to registration, go to capture, help.`}
+            onAction={(action) => {
+              onVoiceAction?.(action);
+            }}
+          />
         </>
       )}
     </div>

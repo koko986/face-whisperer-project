@@ -106,7 +106,6 @@
   --sidebar-ring: oklch(0.72 0.16 162 / 60%);
 }
 
-
 @layer base {
   * {
     border-color: var(--color-border);
@@ -123,15 +122,30 @@
 }
 
 @keyframes fv-scan {
-  0% { transform: translateY(-8%); opacity: 0; }
-  12% { opacity: 1; }
-  88% { opacity: 1; }
-  100% { transform: translateY(108%); opacity: 0; }
+  0% {
+    transform: translateY(-8%);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  88% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(108%);
+    opacity: 0;
+  }
 }
 
 @keyframes fv-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.25; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
 }
 
 @utility fv-scanline {

@@ -13,13 +13,16 @@ import {
 import type { Analysis } from "./types";
 import { useCamera } from "./useCamera";
 import { Viewport } from "./Viewport";
+import { VoiceAssistant } from "./VoiceAssistant";
 
 export function CaptureView({
   model,
   onAnalysis,
+  onVoiceAction,
 }: {
   model: FaceModel | null;
   onAnalysis: (a: Analysis) => void;
+  onVoiceAction?: (action: { type: string; target?: string | undefined }) => void;
 }) {
   const camera = useCamera();
   const [live, setLive] = useState(false);
@@ -27,15 +30,7 @@ export function CaptureView({
   const [detected, setDetected] = useState(false);
   const loop = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const stopLive = useCallback(() => {
-    if (loop.current) clearInterval(loop.current);
-    loop.current = null;
-    setLive(false);
-  }, []);
-
-  useEffect(() => () => stopLive(), [stopLive]);
-
-  const startLive = async () => {
+  const startLive = useCallback(async () => {
     if (!model) {
       toast.error("Register at least two participants first");
       return;
@@ -50,16 +45,27 @@ export function CaptureView({
       setDetected(present);
       setMatch(present ? classify(face.vec, model) : null);
     }, 500);
-  };
+  }, [model, camera]);
 
-  const analyse = (vec: Float64Array<ArrayBufferLike>, preview: string, origin: string) => {
-    const base = classify(vec, model);
-    const ranks = compressionSweep(vec, model);
-    onAnalysis({ preview, base, ranks, origin, at: Date.now() });
-    toast.success("Compression sweep complete — see Analytics Lab");
-  };
+  const stopLive = useCallback(() => {
+    if (loop.current) clearInterval(loop.current);
+    loop.current = null;
+    setLive(false);
+  }, []);
 
-  const snapshot = () => {
+  useEffect(() => () => stopLive(), [stopLive]);
+
+  const analyse = useCallback(
+    (vec: Float64Array<ArrayBufferLike>, preview: string, origin: string) => {
+      const base = classify(vec, model);
+      const { ranks, singularValues } = compressionSweep(vec, model);
+      onAnalysis({ preview, base, ranks, singularValues, origin, at: Date.now() });
+      toast.success("Compression sweep complete — see Analytics Lab");
+    },
+    [model, onAnalysis],
+  );
+
+  const snapshot = useCallback(() => {
     const video = camera.videoRef.current;
     if (!video || video.videoWidth === 0) {
       toast.error("Start the camera feed first");
@@ -67,13 +73,46 @@ export function CaptureView({
     }
     const face = sourceToFace(video, video.videoWidth, video.videoHeight);
     analyse(face.vec, face.preview, "live frame");
-  };
+  }, [camera, analyse]);
 
   const onUpload = async (file?: File) => {
     if (!file) return;
     const face = await fileToFace(file);
     analyse(face.vec, face.preview, file.name);
   };
+
+  const handleVoiceAction = useCallback(
+    (action: { type: string; target?: string | undefined }) => {
+      onVoiceAction?.(action);
+
+      switch (action.type) {
+        case "startCamera":
+          if (!camera.active) void camera.start();
+          break;
+        case "stopCamera":
+          if (camera.active) {
+            stopLive();
+            camera.stop();
+          }
+          break;
+        case "startRecognition":
+          if (!live) void startLive();
+          break;
+        case "stopRecognition":
+          if (live) stopLive();
+          break;
+        case "capture":
+          snapshot();
+          break;
+        case "upload":
+          document.getElementById("voice-upload-input")?.click();
+          break;
+        default:
+          break;
+      }
+    },
+    [camera, live, onVoiceAction, snapshot, startLive, stopLive],
+  );
 
   return (
     <div className="space-y-6">
@@ -141,31 +180,46 @@ export function CaptureView({
               <ScanLine className="size-3.5" /> Capture &amp; analyse
             </button>
           </div>
-          {camera.error && (
-            <p className="text-center text-xs text-destructive">{camera.error}</p>
-          )}
+          {camera.error && <p className="text-center text-xs text-destructive">{camera.error}</p>}
         </div>
 
         <aside className="space-y-4">
           <div className="rounded-lg bg-card p-4 ring-1 ring-border">
-            <p className="fv-label">Last live match</p>
-            <p
-              className={`mt-2 text-2xl font-mono ${
-                match?.name ? "text-primary" : "text-muted-foreground"
-              }`}
-            >
-              {match?.name ?? (detected ? "UNKNOWN" : "NO SUBJECT")}
-            </p>
-            <div className="mt-3 h-1 overflow-hidden rounded-full bg-secondary">
-              <div
-                className="h-full bg-primary transition-all duration-500"
-                style={{ width: `${Math.round((match?.confidence ?? 0) * 100)}%` }}
-              />
-            </div>
-            <div className="mt-2 flex justify-between font-mono text-[10px] uppercase text-muted-foreground">
-              <span>conf {(100 * (match?.confidence ?? 0)).toFixed(1)}%</span>
-              <span>d {Number.isFinite(match?.distance ?? NaN) ? match!.distance.toFixed(1) : "—"}</span>
-            </div>
+            <p className="fv-label">Live recognition</p>
+            {match ? (
+              <div className="mt-3 space-y-2">
+                <div className="flex items-end justify-between gap-2">
+                  <p className="truncate text-2xl font-mono text-primary">
+                    {match.name ?? "UNKNOWN"}
+                  </p>
+                  <span className="shrink-0 font-mono text-[10px] uppercase text-muted-foreground">
+                    {(match.confidence * 100).toFixed(0)}%
+                  </span>
+                </div>
+                <div className="h-1 overflow-hidden rounded-full bg-secondary">
+                  <div
+                    className="h-full bg-primary transition-all duration-500"
+                    style={{ width: `${Math.round(match.confidence * 100)}%` }}
+                  />
+                </div>
+                {match.candidates.length > 1 && (
+                  <div className="mt-2 space-y-1">
+                    {match.candidates.slice(1).map((c) => (
+                      <div key={c.name} className="flex items-center justify-between text-[11px]">
+                        <span className="font-mono text-muted-foreground">{c.name}</span>
+                        <span className="font-mono text-muted-foreground">
+                          {(c.confidence * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="mt-2 text-lg font-mono text-muted-foreground">
+                {detected ? "UNKNOWN" : "NO SUBJECT"}
+              </p>
+            )}
           </div>
 
           <div className="space-y-3 rounded-lg bg-card p-4 ring-1 ring-border">
@@ -176,6 +230,7 @@ export function CaptureView({
                 Upload a photo to run the same sweep
               </span>
               <input
+                id="voice-upload-input"
                 type="file"
                 accept="image/*"
                 className="hidden"
@@ -185,6 +240,15 @@ export function CaptureView({
           </div>
         </aside>
       </div>
+
+      <VoiceAssistant
+        context={
+          model
+            ? `Currently detected: ${match?.name ?? "unknown subject"}. Model has ${model.basis.length} eigenfaces. Available commands: go to registration, go to analytics, start camera, stop camera, start live recognition, stop recognition, capture, upload photo, help.`
+            : "Model not yet calibrated. Register participants first."
+        }
+        onAction={handleVoiceAction}
+      />
     </div>
   );
 }
