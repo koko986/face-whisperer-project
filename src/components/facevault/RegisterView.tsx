@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { fileToFace, sourceToFace, subjectScore, type Participant } from "@/lib/facevault/face";
 import { useCamera } from "./useCamera";
 import { Viewport } from "./Viewport";
+import { VoiceAssistant } from "./VoiceAssistant";
 
 type Sample = { vec: number[]; preview: string };
 
@@ -13,10 +14,12 @@ export function RegisterView({
   participants,
   onRegister,
   onRemove,
+  onVoiceAction,
 }: {
   participants: Participant[];
   onRegister: (name: string, samples: number[][], thumb: string) => void;
   onRemove: (id: string) => void;
+  onVoiceAction?: (action: { type: string; target?: string | undefined }) => void;
 }) {
   const [mode, setMode] = useState<"photos" | "video">("photos");
   const [name, setName] = useState("");
@@ -69,7 +72,7 @@ export function RegisterView({
     }, 650);
   };
 
-  const commit = () => {
+  const commit = useCallback(() => {
     if (!name.trim()) {
       toast.error("Participant name required");
       return;
@@ -88,7 +91,43 @@ export function RegisterView({
     stopGuided();
     camera.stop();
     toast.success("Face set registered — eigenbasis rebuilt");
-  };
+  }, [camera, name, samples, stopGuided, onRegister]);
+
+  const handleVoiceAction = useCallback(
+    (action: { type: string; target?: string | undefined }) => {
+      onVoiceAction?.(action);
+
+      switch (action.type) {
+        case "startCamera":
+          if (!camera.active) void camera.start();
+          break;
+        case "stopCamera":
+          if (camera.active) {
+            stopGuided();
+            camera.stop();
+          }
+          break;
+        case "register":
+          if (name.trim() && samples.length >= 2) {
+            void commit();
+          }
+          break;
+        case "deleteLast":
+          if (participants.length > 0) {
+            onRemove(participants[participants.length - 1]!.id);
+          }
+          break;
+        case "navigate":
+          if (action.target === "capture" || action.target === "analytics") {
+            onVoiceAction?.({ type: "navigate", target: action.target });
+          }
+          break;
+        default:
+          break;
+      }
+    },
+    [camera, commit, name, samples.length, stopGuided, onVoiceAction, onRemove, participants],
+  );
 
   return (
     <div className="space-y-10">
@@ -251,7 +290,7 @@ export function RegisterView({
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="font-mono text-[10px] uppercase text-muted-foreground">
-                    {String(p.samples.length).padStart(2, "0")} samples
+                    {String(p.samples.length).padStart(2, "00")} samples
                   </span>
                   <button
                     onClick={() => onRemove(p.id)}
@@ -270,6 +309,13 @@ export function RegisterView({
           )}
         </div>
       </section>
+
+      <VoiceAssistant
+        context={`Registration mode: ${mode}. ${name ? `Name: ${name}.` : ""} ${samples.length} samples buffered. Available commands: start camera, stop camera, run guided capture, register face, delete last participant, go to capture, go to analytics, help.`}
+        onAction={(action) => {
+          handleVoiceAction(action);
+        }}
+      />
     </div>
   );
 }

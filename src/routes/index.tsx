@@ -45,6 +45,12 @@ function FaceVault() {
 
   const frames = vault.participants.reduce((s, p) => s + p.samples.length, 0);
 
+  const navigate = (target: string) => {
+    if (target === "register" || target === "capture" || target === "analytics") {
+      setView(target);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-panel text-foreground selection:bg-primary/30">
       <header className="sticky top-0 z-50 flex h-10 items-center justify-between border-b border-border bg-card/80 px-4 backdrop-blur-md">
@@ -89,7 +95,9 @@ function FaceVault() {
                     view === id ? "bg-primary/20" : "bg-secondary"
                   }`}
                 >
-                  <Icon className={`size-2.5 ${view === id ? "text-primary" : "text-muted-foreground"}`} />
+                  <Icon
+                    className={`size-2.5 ${view === id ? "text-primary" : "text-muted-foreground"}`}
+                  />
                 </span>
                 {label}
               </button>
@@ -126,6 +134,11 @@ function FaceVault() {
               participants={vault.participants}
               onRegister={vault.addParticipant}
               onRemove={vault.removeParticipant}
+              onVoiceAction={(action) => {
+                if (action.type === "navigate") {
+                  navigate(action.target ?? "register");
+                }
+              }}
             />
           )}
           {view === "capture" && (
@@ -136,9 +149,23 @@ function FaceVault() {
                 vault.countRun();
                 setView("analytics");
               }}
+              onVoiceAction={(action) => {
+                if (action.type === "navigate") {
+                  navigate(action.target ?? "capture");
+                }
+              }}
             />
           )}
-          {view === "analytics" && <AnalyticsView analysis={analysis} />}
+          {view === "analytics" && (
+            <AnalyticsView
+              analysis={analysis}
+              onVoiceAction={(action) => {
+                if (action.type === "navigate") {
+                  navigate(action.target ?? "analytics");
+                }
+              }}
+            />
+          )}
         </main>
       </div>
 
